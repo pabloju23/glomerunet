@@ -18,11 +18,15 @@ NUM_CLASSES = 3
 BATCH_SIZE = 6  # Procesamos una imagen a la vez para evaluaciones individuales
 model = 'deeplab'  # deeplab, unet, segnet, deeplab_base
 
-model_path = f'paper_checkpoints/{model}_glomeruli_multiclass_finetunned_795.keras' 
+# model_path = f'paper_checkpoints/{model}_glomeruli_multiclass_finetunned_795.keras' 
+model_path = f'paper_checkpoints/{model}_glomeruli_multiclass_finetunned_reducedconv.keras'
 # Load the model with compile=False
 print(f'Cargando modelo {model}...')
 if model=='deeplab' or model=='unet':
     model = tf.keras.models.load_model(model_path, compile=False)
+    # from keras_deeplab_model import DeeplabV3Plus_mod
+    # model = DeeplabV3Plus_mod(image_size=512, num_classes=NUM_CLASSES, backbone='resnet50')
+    # model.load_weights(model_path)
 if model == 'segnet':
     from keras_segnet import segnet
     model = segnet((512, 512, 3), NUM_CLASSES)
@@ -71,7 +75,7 @@ test_mask_pm = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/
 test_img = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_3_img.npy')
 test_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_3_mask.npy')
 
-# Evalute in each stain
+# Evaluate on each stain separately 
 print('Evaluando en HE...')
 test_dataset_he = tf.data.Dataset.from_tensor_slices((test_img_he, test_mask_he))
 test_dataset_he = test_dataset_he.batch(BATCH_SIZE)

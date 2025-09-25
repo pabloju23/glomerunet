@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 import elasticdeform
 import keras_cv
+import h5py
 
 
 # Select interpolation mode
@@ -204,7 +205,104 @@ def augment_batch(images, masks):
     
     return aug_images, aug_masks
 
-def create_dataset(images_file, masks_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=1000, only_positive_masks=False, class_target=None, repeat=1):
+def h5_generator_onehot(h5_path, batch_size, n_classes=3):
+    with h5py.File(h5_path, "r") as f:
+        images = f["images"]
+        masks = f["masks"]
+        n = images.shape[0]
+
+        idxs = np.arange(n)
+        # np.random.shuffle(idxs)
+
+        for start in range(0, n, batch_size):
+            end = min(start + batch_size, n)
+            batch_idx = idxs[start:end]
+
+            batch_imgs = images[batch_idx].astype("float32") / 255.0
+            batch_masks = masks[batch_idx].astype("int32")  # grayscale con valores 0,1,2
+
+            # Convertir a one-hot
+            batch_masks = tf.keras.utils.to_categorical(batch_masks, num_classes=n_classes)
+
+            yield batch_imgs, batch_masks.astype("float32")
+
+def create_dataset_h5(h5_file, batch_size, augmentation=False, shuffle=True, 
+                      shuffle_buffer_size=10, only_positive_masks=False, 
+                      class_target=None, repeat=1, n_classes=3):
+
+    dataset = tf.data.Dataset.from_generator(
+        lambda: h5_generator_onehot(h5_file, batch_size, n_classes=n_classes),
+        output_signature=(
+            tf.TensorSpec(shape=(None, 512, 512, 3), dtype=tf.float32),  # RGB
+            tf.TensorSpec(shape=(None, 512, 512, n_classes), dtype=tf.float32),  # máscaras one-hot
+        )
+    )
+
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)
+
+    if augmentation:
+        dataset_aug = dataset
+        if class_target is not None:
+            dataset_aug = dataset_aug.filter(
+                lambda img, msk: tf.reduce_any(msk[..., class_target] > 0)
+            )
+        if only_positive_masks:
+            dataset_aug = dataset_aug.filter(
+                lambda img, msk: tf.reduce_sum(msk[..., 1:]) > 0
+            )
+            dataset_aug = dataset_aug.map(
+                augment_batch, num_parallel_calls=tf.data.AUTOTUNE
+            ).repeat(repeat)
+        else:
+            dataset_aug = dataset_aug.map(
+                augment_batch, num_parallel_calls=tf.data.AUTOTUNE
+            ).repeat(repeat)
+
+        dataset = dataset.concatenate(dataset_aug)
+
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
+
+
+def create_dataset_with_class_augmentation_h5(h5_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=10, n_classes=3):
+    def filter_by_class(mask, target_class):
+        """Check if a given target class is present in the mask."""
+        return tf.reduce_any(mask[..., target_class] > 0)
+
+    def replicate_dataset(dataset, class_target, repetitions):
+        """Replicate the dataset for a specific class a given number of times."""
+        filtered_dataset = dataset.filter(lambda img, msk: filter_by_class(msk, class_target))
+        augmented_dataset = filtered_dataset.map(
+            augment_batch, num_parallel_calls=tf.data.AUTOTUNE
+        )
+        return augmented_dataset.repeat(repetitions)
+
+    # Base dataset generation
+    dataset = tf.data.Dataset.from_generator(
+        lambda: h5_generator_onehot(h5_file, batch_size, n_classes=n_classes),
+        output_signature=(
+            tf.TensorSpec(shape=(None, 512, 512, 3), dtype=tf.float32),        # imágenes RGB
+            tf.TensorSpec(shape=(None, 512, 512, n_classes), dtype=tf.float32) # máscaras one-hot
+        )
+    )
+
+    if augmentation:
+        # Create augmented datasets for each target class
+        dataset_class_2 = replicate_dataset(dataset, class_target=2, repetitions=5)
+        dataset_class_1 = replicate_dataset(dataset, class_target=1, repetitions=1)
+
+        # Combine the augmented datasets with the original dataset
+        dataset = dataset.concatenate(dataset_class_2).concatenate(dataset_class_1)
+
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)
+        
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
+
+
+def create_dataset(images_file, masks_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=100, only_positive_masks=False, class_target=None, repeat=1):
     dataset = tf.data.Dataset.from_generator(
         lambda: npy_generator(images_file, masks_file, batch_size),
         output_signature=(
@@ -238,7 +336,7 @@ def create_dataset(images_file, masks_file, batch_size, augmentation=False, shuf
     return dataset
 
 
-def create_dataset_with_class_augmentation(images_file, masks_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=1000):   
+def create_dataset_with_class_augmentation(images_file, masks_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=100):   
     def filter_by_class(mask, target_class):
         """Check if a given target class is present in the mask."""
         return tf.reduce_any(mask[..., target_class] > 0)
@@ -271,5 +369,6 @@ def create_dataset_with_class_augmentation(images_file, masks_file, batch_size, 
         
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
+
 
 

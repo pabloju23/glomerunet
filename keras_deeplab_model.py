@@ -45,6 +45,7 @@ def DilatedSpatialPyramidPooling(dspp_input):
     return output
 
 def DilatedSpatialPyramidPooling_mod(dspp_input):
+    # # Ablation study: DSPP with huge pooling (blurry result) 
     # dims = dspp_input.shape
     # x = layers.AveragePooling2D(pool_size=(dims[-3], dims[-2]))(dspp_input)
     # x = convolution_block(x, kernel_size=1, use_bias=True)
@@ -53,25 +54,24 @@ def DilatedSpatialPyramidPooling_mod(dspp_input):
     #     interpolation="bilinear",
     # )(x)
 
-    # Image pooling con reducción a 16x16
+    # 2x2 Image pooling con reducción a 16x16
     x = layers.AveragePooling2D(pool_size=(2, 2))(dspp_input)  # Reduce de 32x32 a 16x16
     x = convolution_block(x, kernel_size=1, use_bias=True)  # Bloque convolucional de 1x1
     out_pool = layers.UpSampling2D(size=(2, 2), interpolation="bilinear")(x)  # Upsample de 16x16 a 32x32
     
-    # out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
-    # out_5 = convolution_block(dspp_input, kernel_size=5, dilation_rate=2)
-    # out_10 = convolution_block(dspp_input, kernel_size=5, dilation_rate=4)
-    # out_15 = convolution_block(dspp_input, kernel_size=5, dilation_rate=7)
-    # out_20 = convolution_block(dspp_input, kernel_size=5, dilation_rate=20)
-    # out_25 = convolution_block(dspp_input, kernel_size=5, dilation_rate=25)
-    # x = layers.Concatenate(axis=-1)([out_pool, out_1, out_5, out_10, out_15, out_20, out_25]
-
-    # For a 512p input, DSPP is performed over 32p area
+    # Ablation study: original DSPP with dilation rates 1, 6, 12, 18 
     out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
-    out_2 = convolution_block(dspp_input, kernel_size=3, dilation_rate=2)
-    out_4 = convolution_block(dspp_input, kernel_size=3, dilation_rate=4)
-    out_8 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
-    x = layers.Concatenate(axis=-1)([out_pool, out_1, out_2, out_4, out_8])
+    out_6 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
+    out_12 = convolution_block(dspp_input, kernel_size=3, dilation_rate=12)
+    out_18 = convolution_block(dspp_input, kernel_size=3, dilation_rate=18)
+    x = layers.Concatenate(axis=-1)([out_pool, out_1, out_6, out_12, out_18])
+
+    # # For a 512p input, DSPP is performed over 32p area
+    # out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
+    # out_2 = convolution_block(dspp_input, kernel_size=3, dilation_rate=2)
+    # out_4 = convolution_block(dspp_input, kernel_size=3, dilation_rate=4)
+    # out_8 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
+    # x = layers.Concatenate(axis=-1)([out_pool, out_1, out_2, out_4, out_8])
 
     output = convolution_block(x, kernel_size=1)
     return output
@@ -202,6 +202,14 @@ def DeeplabV3Plus_mod(image_size, num_classes=None, name='DeeplabV3Plus', backbo
         )
         x = base_model.get_layer("block_13_expand_relu").output  # Approx. 5x down
         input_b = base_model.get_layer("block_3_expand_relu").output  # Approx. 3x down
+
+    if backbone == 'resnet101':
+        preprocessed = keras.applications.resnet.preprocess_input(model_input)
+        resnet101 = keras.applications.ResNet101(
+            weights=weights, include_top=False, input_tensor=preprocessed
+        )
+        x = resnet101.get_layer("conv4_block23_2_relu").output
+        input_b = resnet101.get_layer("conv2_block2_out").output
 
     if backbone == 'resnet50':
         preprocessed = keras.applications.resnet50.preprocess_input(model_input)

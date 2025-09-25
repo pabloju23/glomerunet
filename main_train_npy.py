@@ -9,17 +9,16 @@ for gpu in gpus:
 import numpy as np
 from keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
 from data_augmentor import create_dataset, create_dataset_with_class_augmentation
-from data_augmentor import create_dataset_h5, create_dataset_with_class_augmentation_h5
 import pickle
 
 
 # Configuration
 IMAGE_SIZE = (512, 512, 3)  
-BATCH_SIZE = 39  
+BATCH_SIZE = 33  
 NUM_CLASSES=3
 val = True
 model_save = 'deeplab'
-only_weights = False
+only_weights = True
 pretrain = True
 
 # Tamaño de las imágenes 
@@ -27,17 +26,88 @@ img_height = IMAGE_SIZE[0]
 img_width = IMAGE_SIZE[1]
 batch_size = BATCH_SIZE
 
+# # # Extract patches
+# # train_img_patches, train_mask_patches = extract_patches(train_img, train_mask, patch_size, stride)
+# test_img_patches, test_mask_patches = extract_patches(test_img, test_mask, patch_size, stride)
+fold2 = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_2_img.npy')
+fold2_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_2_mask.npy')
+fold4 = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_4_img.npy')
+fold4_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_4_mask.npy')
+fold5 = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_5_img.npy')
+fold5_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_5_mask.npy')
+
+train_img_patchesD1 = np.concatenate([fold2, fold4, fold5], axis=0)
+train_mask_patchesD1 = np.concatenate([fold2_mask, fold4_mask, fold5_mask], axis=0)
+
+train_img_patchesD2 = np.load('/scratch.local/juanp/glomeruli/dataset/trainD2_paper/train_imgD2_v2_positive.npy')
+train_masks_patchesD2 = np.load('/scratch.local/juanp/glomeruli/dataset/trainD2_paper/train_maskD2_v2_positive.npy')
+
+val_img_patches = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_1_img.npy')
+val_mask_patches = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_1_mask.npy')
+# train_img_combined = np.load('/scratch.local/juanp/glomeruli/dataset/combined_train_images.npy')
+# train_mask_combined = np.load('/scratch.local/juanp/glomeruli/dataset/combined_train_masks.npy')
+# test_img_patches = np.load('/scratch.local3/juanp/dataset/paper_512/test_img.npy')
+# test_mask_patches = np.load('/scratch.local3/juanp/dataset/paper_512/test_mask.npy')
+
+# Convert the 3 classes mask to 2 classes hot encoded masks
+# train_mask_patches = np.concatenate([train_mask_patches[..., :1], np.sum(train_mask_patches[..., 1:], axis=-1, keepdims=True)], axis=-1)
+# val_mask_patches = np.concatenate([val_mask_patches[..., :1], np.sum(val_mask_patches[..., 1:], axis=-1, keepdims=True)], axis=-1)
+
+# # Ensure the data is in the correct dtype
+train_img_patchesD1 = train_img_patchesD1.astype(np.float32)
+train_mask_patchesD1 = train_mask_patchesD1.astype(np.float32)
+train_img_patchesD2 = train_img_patchesD2.astype(np.float32)
+tain_masks_patchesD2 = train_masks_patchesD2.astype(np.float32)
+val_img_patches = val_img_patches.astype(np.float32)
+val_mask_patches = val_mask_patches.astype(np.float32)
+# train_img_combined = train_img_combined.astype(np.float32)
+# train_mask_combined = train_mask_combined.astype(np.float32)
+
+# Shufle data from D2 by indexes
+indexes = np.arange(train_img_patchesD2.shape[0])
+np.random.shuffle(indexes)
+train_img_patchesD2 = train_img_patchesD2[indexes]
+tain_masks_patchesD2 = tain_masks_patchesD2[indexes] 
+
+indexes_d1 = np.arange(train_img_patchesD1.shape[0])
+np.random.shuffle(indexes_d1)
+train_img_patchesD1 = train_img_patchesD1[indexes_d1]
+train_mask_patchesD1 = train_mask_patchesD1[indexes_d1]
+
+
+# Comprobar dimensiones y maximos y minimos
+print(f'Train Image Patches Shape: {train_img_patchesD1.shape}, Max: {train_img_patchesD1.max()}, Min: {train_img_patchesD1.min()}')
+print(f'Train Mask Patches Shape: {train_mask_patchesD1.shape}, Max: {train_mask_patchesD1.max()}, Min: {train_mask_patchesD1.min()}')
+print(f'Val Image Patches Shape: {val_img_patches.shape}, Max: {val_img_patches.max()}, Min: {val_img_patches.min()}')
+print(f'Val Mask Patches Shape: {val_mask_patches.shape}, Max: {val_mask_patches.max()}, Min: {val_mask_patches.min()}')
+# print(f'Test Image Patches Shape: {test_img_patches.shape}, Max: {test_img_patches.max()}, Min: {test_img_patches.min()}')
+# print(f'Test Mask Patches Shape: {test_mask_patches.shape}, Max: {test_mask_patches.max()}, Min: {test_mask_patches.min()}')
+print(f'Train Image Patches1 Shape: {train_img_patchesD2.shape}, Max: {train_img_patchesD2.max()}, Min: {train_img_patchesD2.min()}')
+print(f'Train Mask Patches1 Shape: {tain_masks_patchesD2.shape}, Max: {tain_masks_patchesD2.max()}, Min: {tain_masks_patchesD2.min()}')
+
+
+# Comprobar formato de archivos
+print(f'Train Image Patches Format: {train_img_patchesD1.dtype}')
+print(f'Train Mask Patches Format: {train_mask_patchesD1.dtype}')
+print(f'Val Image Patches Format: {val_img_patches.dtype}')
+print(f'Val Mask Patches Format: {val_mask_patches.dtype}')
+
 # Create datasets
-train_datasetD1 = create_dataset_with_class_augmentation_h5('dataset/h5/train_d1.h5', batch_size=BATCH_SIZE, shuffle=True, augmentation=True)
-val_dataset = create_dataset_h5('dataset/h5/val.h5', batch_size=BATCH_SIZE, shuffle=False) 
-train_datasetD2 = create_dataset_with_class_augmentation_h5('dataset/h5/train_d2.h5', batch_size=BATCH_SIZE, shuffle=True, augmentation=True)
+# train_datasetD1 = create_dataset(train_img_patchesD1, train_mask_patchesD1, batch_size=BATCH_SIZE, shuffle=True,  augmentation=True, only_positive_masks=True, class_target=2)
+train_datasetD1 = create_dataset_with_class_augmentation(train_img_patchesD1, train_mask_patchesD1, batch_size=BATCH_SIZE, shuffle=True, augmentation=True)
+val_dataset = create_dataset(val_img_patches, val_mask_patches, batch_size=BATCH_SIZE, shuffle=False) 
+# train_datasetD2 = create_dataset(train_img_patchesD2, tain_masks_patchesD2, batch_size=BATCH_SIZE, shuffle=True, augmentation=True, only_positive_masks=True, class_target=2)
+train_datasetD2 = create_dataset_with_class_augmentation(train_img_patchesD2, tain_masks_patchesD2, batch_size=BATCH_SIZE, shuffle=True, augmentation=True)
+# train_dataset_combined = create_dataset(train_img_combined, train_mask_combined, batch_size=BATCH_SIZE, shuffle=True, augmentation=True, only_positive_masks=True)
+# test_dataset = create_dataset(test_img_patches, test_mask_patches, batch_size=BATCH_SIZE)
+
 
 # Define callbacks with monitor set to validation mean IoU
 callbacks = [
     tf.keras.callbacks.EarlyStopping(monitor='val_dsc_nobg', mode='max', patience=12, restore_best_weights=True, verbose=1),
     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_nobg', mode='max', factor=0.1, patience=7, verbose=1, min_lr=1e-5),
     # lr_schedule,
-    tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain.keras', save_best_only=True, save_weights_only=only_weights,
+    tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain_resnet101.keras', save_best_only=True, save_weights_only=only_weights,
                                     monitor='val_dsc_nobg', mode='max', verbose=1)
 ]
 
@@ -112,7 +182,7 @@ with strategy.scope():
     # from keras_segnet import segnet
     # model = segnet((512, 512, 3), NUM_CLASSES)
 
-    model = model_name(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, backbone='xception', weights='imagenet')
+    model = model_name(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, backbone='resnet101', weights='imagenet')
 
     model.summary()
 
@@ -127,20 +197,23 @@ with strategy.scope():
         model.compile(optimizer=opt,
                         loss=cftl,
                         metrics=[iou_metric, dice_metric, dice_nobg, dice_1, dice_2])
+        
+        print("Shape of predictions:", model.output_shape)
+        print("Shape of labels from datasets:", train_masks_patchesD2.shape, val_mask_patches.shape)
 
         # Train model
-        print(f"Pretraining with D2: {model_name}...")
+        print(f"Training {model_name}...")
         if val:
             history = model.fit(train_datasetD2, epochs=30, 
                                 validation_data=val_dataset, 
                                 callbacks=callbacks)
         else:
             history = model.fit(train_datasetD2, epochs=20)
-            model.save(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain.keras')
+            model.save(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain_resnet101.keras')
 
 
         # Save history to plot later
-        with open(f'paper_checkpoints/training_history_{model_save}_pretrain.pkl', 'wb') as f:
+        with open(f'paper_checkpoints/training_history_{model_save}_pretrain_resnet101.pkl', 'wb') as f:
             pickle.dump(history.history, f)
         
         # Save best epoch loss and metrics
@@ -159,6 +232,7 @@ with strategy.scope():
     else:
         # Cargar el modelo completo guardado
         model = tf.keras.models.load_model(f"paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain.keras", compile=False) 
+
 
     # # Inicializar el contador de capas
     # total_layers = 0
@@ -180,11 +254,11 @@ with strategy.scope():
         tf.keras.callbacks.EarlyStopping(monitor='val_dsc_nobg', mode='max', patience=13, restore_best_weights=True, verbose=1),
         tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_nobg', mode='max', factor=0.1, min_lr=1e-7, patience=6, verbose=1),
         # lr_schedule,
-        tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_finetunned.keras', save_best_only=True, save_weights_only=only_weights,
+        tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_finetunned_resnet101.keras', save_best_only=True, save_weights_only=only_weights,
                                         monitor='val_dsc_nobg', mode='max', verbose=1)
     ]
 
-    print(f"Fine-tunning with D1: {model_name}...")
+    print(f"Fine-tunning {model_name}...")
     if val:
         history = model.fit(train_datasetD1, epochs=30, 
                             validation_data=val_dataset, 
@@ -194,7 +268,7 @@ with strategy.scope():
         model.save(f'paper_checkpoints/{model_save}_glomeruli_multiclass_finetunned.keras')
     
     # Save history to plot later 
-    with open(f'paper_checkpoints/training_history_{model_save}_finetunned.pkl', 'wb') as f:
+    with open(f'paper_checkpoints/training_history_{model_save}_finetunned_resnet101.pkl', 'wb') as f:
         pickle.dump(history.history, f)
 
     # Save best epoch loss and metrics
