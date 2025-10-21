@@ -1,6 +1,10 @@
 # Ignorar datasets y resultados
 dataset/
 runs/
+# Evitar checkpoints y pesos grandes
+models/*/checkpoints/
+paper_checkpoints/
+
 
 # Ignorar carpetas de predicciones y ejecuciones de monai_swinunetr
 models/monai_swinunetr/preds_nnunet/
