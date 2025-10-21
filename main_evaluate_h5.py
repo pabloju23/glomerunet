@@ -1,26 +1,25 @@
 import os
 import numpy as np
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
 # Set environment variable to select only GPU 1 and GPU 2
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
 
 # Optimize GPU memory allocation
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
-from data_augmentor import create_dataset
+from data_augmentor import create_dataset_h5
 from dice_metric import OneHotDice
 
 NUM_CLASSES = 3
-BATCH_SIZE = 6  # Procesamos una imagen a la vez para evaluaciones individuales
-model = 'deeplab'  # deeplab, unet, segnet, deeplab_base, unetr
+BATCH_SIZE = 9  # Procesamos una imagen a la vez para evaluaciones individuales
+model = 'deeplab'  # deeplab, unet, segnet, deeplab_base
 
 # model_path = f'paper_checkpoints/{model}_glomeruli_multiclass_finetunned_795.keras' 
-model_path = f'paper_checkpoints/{model}_glomeruli_multiclass_finetunned_pool.keras'
+model_path = f'paper_checkpoints/corrected_split(not_paper)/{model}_glomeruli_multiclass_finetunned.keras'
 # Load the model with compile=False
 print(f'Cargando modelo {model}...')
 if model=='deeplab' or model=='unet':
@@ -28,31 +27,6 @@ if model=='deeplab' or model=='unet':
     # from keras_deeplab_model import DeeplabV3Plus_mod
     # model = DeeplabV3Plus_mod(image_size=512, num_classes=NUM_CLASSES, backbone='resnet101')
     # model.load_weights(model_path)
-if model == 'unetr':
-    # Import all from UNETR_2D
-    from models.UNETR_2D.models.UNETR_2D import UNETR_2D
-    from models.UNETR_2D.models.modules import Patches, PatchEncoder, mlp
-    custom_objs = {
-        "UNETR_2D": UNETR_2D,
-        "Patches": Patches,
-        "PatchEncoder": PatchEncoder,
-        "mlp": mlp
-    }
-    model = tf.keras.models.load_model(
-        model_path,
-        compile=False,
-        custom_objects=custom_objs
-        )
-if model == 'unetr_2d':
-    from keras_unetr_2d import transformer_encoder, conv_block, deconv_block, mlp, build_unetr_2d
-    model = tf.keras.models.load_model(model_path, compile=False,
-                   custom_objects={
-                       "mlp": mlp,
-                       "transformer_encoder": transformer_encoder,
-                       "conv_block": conv_block,
-                       "deconv_block": deconv_block,
-                       "build_unetr_2d": build_unetr_2d
-                   })
 if model == 'segnet':
     from keras_segnet import segnet
     model = segnet((512, 512, 3), NUM_CLASSES)
@@ -92,55 +66,28 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
 
 # Load test dataset
 print('Cargando dataset...')
-test_img_he = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold3_img_he.npy')
-test_mask_he = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold3_mask_he.npy')
-test_img_pas = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold3_img_pas.npy')
-test_mask_pas = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold3_mask_pas.npy')
-test_img_pm = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold3_img_pm.npy')
-test_mask_pm = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold3_mask_pm.npy')
-test_img = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_3_img.npy')
-test_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_3_mask.npy')
+test_dataset_he = create_dataset_h5('dataset/h5/test.h5', batch_size=BATCH_SIZE, shuffle=False, group='he') 
+test_dataset_pas = create_dataset_h5('dataset/h5/test.h5', batch_size=BATCH_SIZE, shuffle=False, group='pas')
+test_dataset_pm = create_dataset_h5('dataset/h5/test.h5', batch_size=BATCH_SIZE, shuffle=False, group='pm')
+
+# Unite all test datasets in one to test the metrics together
+test_dataset = test_dataset_he.concatenate(test_dataset_pas).concatenate(test_dataset_pm)
 
 # Evaluate on each stain separately 
 print('Evaluando en HE...')
-test_dataset_he = tf.data.Dataset.from_tensor_slices((test_img_he, test_mask_he))
-test_dataset_he = test_dataset_he.batch(BATCH_SIZE)
 model.evaluate(test_dataset_he)
 
 print('Evaluando en PAS...')
-test_dataset_pas = tf.data.Dataset.from_tensor_slices((test_img_pas, test_mask_pas))
-test_dataset_pas = test_dataset_pas.batch(BATCH_SIZE)
 model.evaluate(test_dataset_pas)
 
 print('Evaluando en PM...')
-test_dataset_pm = tf.data.Dataset.from_tensor_slices((test_img_pm, test_mask_pm))
-test_dataset_pm = test_dataset_pm.batch(BATCH_SIZE)
 model.evaluate(test_dataset_pm)
 
-# Squeeze
-test_img = np.squeeze(test_img)
-test_mask = np.squeeze(test_mask)
-
-# Checkl all classes present in one hot encoded masks
-print('Clases presentes en las máscaras one-hot encoded:', (np.sum(test_mask, axis=(0, 1, 2)) / np.prod(test_mask.shape[:3]) * 100))
-
-print('Comprobando dataset...')
-for i, (img, mask) in enumerate(zip(test_img, test_mask)):
-    if img.shape != (512, 512, 3) or mask.shape != (512, 512, NUM_CLASSES):
-        print(f"Error en el ejemplo {i}: Imagen {img.shape}, Máscara {mask.shape}")
-    if np.max(img) > 1 or np.max(mask) > 1:
-        print(f"Error en el ejemplo {i}: Imagen {np.max(img)}, Máscara {np.max(mask)}")
-
-print("Forma de entrada del modelo:", model.input_shape)
-print("Forma de salida del modelo:", model.output_shape)
-
 # Create test dataset
-test_dataset = create_dataset(test_img, test_mask, batch_size=BATCH_SIZE, augmentation=False, shuffle=False)
+# test_dataset = create_dataset(test_img, test_mask, batch_size=BATCH_SIZE, augmentation=False, shuffle=False)
 print('Evaluando...')
-# test_dataset = tf.data.Dataset.from_tensor_slices((test_img, test_mask))
-# test_dataset = test_dataset.batch(BATCH_SIZE)
-
 model.evaluate(test_dataset)
+
 # exit()
 predictions = model.predict(test_img, batch_size=BATCH_SIZE)
 
@@ -387,106 +334,4 @@ def check_data(images, masks, predictions):
     assert images.shape[1:] == (512, 512, 3), "Las imágenes deben tener forma (N, 512, 512, 3)"
     assert masks.shape[1:] == (512, 512, NUM_CLASSES), "Las máscaras deben tener forma (N, 512, 512, NUM_CLASSES)"
     assert predictions.shape[1:] == (512, 512, NUM_CLASSES), "Las predicciones deben tener forma (N, 512, 512, NUM_CLASSES)"
-
-def plot_confusion_matrix(y_pred, y_true, class_names):
-    """
-    Plots both absolute and normalized (percentage) confusion matrices.
-
-    Args:
-        y_pred: Predicted labels (1D array).
-        y_true: True labels (1D array).
-        class_names: List of class names corresponding to the labels.
-    """
-    from sklearn.metrics import confusion_matrix
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    # Matriz de confusión absoluta
-    cm = confusion_matrix(y_true, y_pred, labels=range(len(class_names)))
-
-    # Matriz normalizada (por fila)
-    cm_norm = cm.astype(np.float32) / (cm.sum(axis=1, keepdims=True) + 1e-8)
-
-    # ------------------------------
-    # Matriz absoluta
-    # ------------------------------
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=class_names, yticklabels=class_names)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title('Confusion Matrix (Absolute pixel counts)')
-    plt.show()
-
-    # ------------------------------
-    # Matriz normalizada (% por clase)
-    # ------------------------------
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm_norm, annot=True, fmt='.4f', cmap='Blues',
-                xticklabels=class_names, yticklabels=class_names)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title('Confusion Matrix (Per-class pixel accuracy)')
-    plt.show()
-
-    # También imprimimos el accuracy por clase en texto
-    for i, cname in enumerate(class_names):
-        print(f"Accuracy clase '{cname}': {cm_norm[i, i]:.4f}")
-
-import cv2
-
-# ------------------------------
-# Helper: convertir máscara one-hot a RGB
-# ------------------------------
-def mask_to_rgb(mask):
-    """Convierte una máscara one-hot (H,W,3) a imagen RGB con:
-       fondo negro, clase1 verde, clase2 roja."""
-    h, w, _ = mask.shape
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    class_map = np.argmax(mask, axis=-1)
-
-    rgb[class_map == 1] = (0, 255, 0)   # clase 1 -> verde
-    rgb[class_map == 2] = (255, 0, 0)   # clase 2 -> rojo
-    return rgb
-
-# ------------------------------
-# Función para guardar pares imagen-predicción
-# ------------------------------
-def save_predictions_by_stain(images, preds, stain_name):
-    os.makedirs(stain_name, exist_ok=True)
-    print(f"Saving results in folder: {stain_name}")
-
-    for i, (img, pred) in enumerate(zip(images, preds)):
-        # Convertir imagen [0,1] a [0,255]
-        img_uint8 = (np.clip(img, 0, 1) * 255).astype(np.uint8)
-
-        # Predicción: argmax -> RGB
-        pred_rgb = mask_to_rgb(pred)
-
-        # Guardar archivos PNG
-        img_path = os.path.join(stain_name, f"{i:03d}_img.png")
-        pred_path = os.path.join(stain_name, f"{i:03d}_pred.png")
-
-        cv2.imwrite(img_path, cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR))
-        cv2.imwrite(pred_path, cv2.cvtColor(pred_rgb, cv2.COLOR_RGB2BGR))
-
-    print(f"Saved {len(images)} image-prediction pairs in {stain_name}/")
-
-# ------------------------------
-# Predecir y guardar por tinción
-# ------------------------------
-print("Predicting and saving HE...")
-pred_he = model.predict(test_img_he, batch_size=BATCH_SIZE)
-save_predictions_by_stain(test_img_he, pred_he, "he")
-
-print("Predicting and saving PAS...")
-pred_pas = model.predict(test_img_pas, batch_size=BATCH_SIZE)
-save_predictions_by_stain(test_img_pas, pred_pas, "pas")
-
-print("Predicting and saving PM...")
-pred_pm = model.predict(test_img_pm, batch_size=BATCH_SIZE)
-save_predictions_by_stain(test_img_pm, pred_pm, "pm")
-
-print("All predictions saved successfully!")
 

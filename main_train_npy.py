@@ -1,4 +1,5 @@
 import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 # Set environment variable to select GPU's
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2"
 import tensorflow as tf
@@ -14,11 +15,11 @@ import pickle
 
 # Configuration
 IMAGE_SIZE = (512, 512, 3)  
-BATCH_SIZE = 33  
+BATCH_SIZE = 45  #
 NUM_CLASSES=3
 val = True
-model_save = 'deeplab'
-only_weights = True
+model_save = 'unetr_2d'
+only_weights = False
 pretrain = True
 
 # Tamaño de las imágenes 
@@ -29,25 +30,25 @@ batch_size = BATCH_SIZE
 # # # Extract patches
 # # train_img_patches, train_mask_patches = extract_patches(train_img, train_mask, patch_size, stride)
 # test_img_patches, test_mask_patches = extract_patches(test_img, test_mask, patch_size, stride)
-fold2 = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_2_img.npy')
-fold2_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_2_mask.npy')
-fold4 = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_4_img.npy')
-fold4_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_4_mask.npy')
-fold5 = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_5_img.npy')
-fold5_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_5_mask.npy')
+fold2 = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_2_img.npy')
+fold2_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_2_mask.npy')
+fold4 = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_4_img.npy')
+fold4_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_4_mask.npy')
+fold5 = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_5_img.npy')
+fold5_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_5_mask.npy')
 
 train_img_patchesD1 = np.concatenate([fold2, fold4, fold5], axis=0)
 train_mask_patchesD1 = np.concatenate([fold2_mask, fold4_mask, fold5_mask], axis=0)
 
-train_img_patchesD2 = np.load('/scratch.local/juanp/glomeruli/dataset/trainD2_paper/train_imgD2_v2_positive.npy')
-train_masks_patchesD2 = np.load('/scratch.local/juanp/glomeruli/dataset/trainD2_paper/train_maskD2_v2_positive.npy')
+train_img_patchesD2 = np.load('/scratch.local2/juanp/glomeruli/dataset/trainD2_paper/train_imgD2_v2_positive.npy')
+train_masks_patchesD2 = np.load('/scratch.local2/juanp/glomeruli/dataset/trainD2_paper/train_maskD2_v2_positive.npy')
 
-val_img_patches = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_1_img.npy')
-val_mask_patches = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_1_mask.npy')
-# train_img_combined = np.load('/scratch.local/juanp/glomeruli/dataset/combined_train_images.npy')
-# train_mask_combined = np.load('/scratch.local/juanp/glomeruli/dataset/combined_train_masks.npy')
-# test_img_patches = np.load('/scratch.local3/juanp/dataset/paper_512/test_img.npy')
-# test_mask_patches = np.load('/scratch.local3/juanp/dataset/paper_512/test_mask.npy')
+val_img_patches = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_1_img.npy')
+val_mask_patches = np.load('/scratch.local2/juanp/glomeruli/dataset/processed(5fold)/fold_1_mask.npy')
+# train_img_combined = np.load('/scratch.local2/juanp/glomeruli/dataset/combined_train_images.npy')
+# train_mask_combined = np.load('/scratch.local2/juanp/glomeruli/dataset/combined_train_masks.npy')
+# test_img_patches = np.load('/scratch.local23/juanp/dataset/paper_512/test_img.npy')
+# test_mask_patches = np.load('/scratch.local23/juanp/dataset/paper_512/test_mask.npy')
 
 # Convert the 3 classes mask to 2 classes hot encoded masks
 # train_mask_patches = np.concatenate([train_mask_patches[..., :1], np.sum(train_mask_patches[..., 1:], axis=-1, keepdims=True)], axis=-1)
@@ -107,7 +108,7 @@ callbacks = [
     tf.keras.callbacks.EarlyStopping(monitor='val_dsc_nobg', mode='max', patience=12, restore_best_weights=True, verbose=1),
     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_nobg', mode='max', factor=0.1, patience=7, verbose=1, min_lr=1e-5),
     # lr_schedule,
-    tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain_resnet101.keras', save_best_only=True, save_weights_only=only_weights,
+    tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain.keras', save_best_only=True, save_weights_only=only_weights,
                                     monitor='val_dsc_nobg', mode='max', verbose=1)
 ]
 
@@ -115,7 +116,24 @@ callbacks = [
 strategy = tf.distribute.MirroredStrategy()
 
 # Define models to train
-model_name = DeeplabV3Plus_mod
+if model_save == 'deeplab':
+    from keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
+    model_name = DeeplabV3Plus_mod
+elif model_save == 'unetr_2d':
+    model_name = "build_unetr_2d"
+    config = {}
+    config["image_size"] = 512
+    config["num_classes"] = 3
+    config["num_layers"] = 12
+    config["hidden_dim"] = 128
+    config["mlp_dim"] = 256
+    config["num_heads"] = 8
+    config["dropout_rate"] = 0.1
+    config["patch_size"] = 16
+    config["num_patches"] = (config["image_size"]**2)//(config["patch_size"]**2)
+    config["num_channels"] = 3
+# model_name = DeeplabV3Plus_mod
+# model_name = UNETR_2D
 
 # Train models and save performance summary
 performance_summary = []
@@ -182,7 +200,28 @@ with strategy.scope():
     # from keras_segnet import segnet
     # model = segnet((512, 512, 3), NUM_CLASSES)
 
-    model = model_name(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, backbone='resnet101', weights='imagenet')
+    if model_save == 'deeplab':
+        model = model_name(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, backbone='xception', weights='imagenet')
+    elif model_save == 'unetr_2d':
+        model = build_unetr_2d(config)
+    elif model_save == 'unetr':
+        model = model_name(
+                        input_shape = (512, 512, 3),
+                        patch_size = 32,
+                        num_patches = 256,
+                        projection_dim = 256,
+                        transformer_layers = 12,
+                        num_heads = 12,
+                        transformer_units = [1024, 256], 
+                        data_augmentation = None,
+                        num_filters = 32,
+                        num_classes = 3,
+                        decoder_activation = 'relu',
+                        decoder_kernel_init = 'he_normal',
+                        ViT_hidd_mult=3,
+                        batch_norm = True,
+                        dropout = 0.0,
+                    )
 
     model.summary()
 
@@ -209,11 +248,11 @@ with strategy.scope():
                                 callbacks=callbacks)
         else:
             history = model.fit(train_datasetD2, epochs=20)
-            model.save(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain_resnet101.keras')
+            model.save(f'paper_checkpoints/{model_save}_glomeruli_multiclass_pretrain.keras')
 
 
         # Save history to plot later
-        with open(f'paper_checkpoints/training_history_{model_save}_pretrain_resnet101.pkl', 'wb') as f:
+        with open(f'paper_checkpoints/training_history_{model_save}_pretrain.pkl', 'wb') as f:
             pickle.dump(history.history, f)
         
         # Save best epoch loss and metrics
@@ -254,7 +293,7 @@ with strategy.scope():
         tf.keras.callbacks.EarlyStopping(monitor='val_dsc_nobg', mode='max', patience=13, restore_best_weights=True, verbose=1),
         tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_nobg', mode='max', factor=0.1, min_lr=1e-7, patience=6, verbose=1),
         # lr_schedule,
-        tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_finetunned_resnet101.keras', save_best_only=True, save_weights_only=only_weights,
+        tf.keras.callbacks.ModelCheckpoint(f'paper_checkpoints/{model_save}_glomeruli_multiclass_finetunned.keras', save_best_only=True, save_weights_only=only_weights,
                                         monitor='val_dsc_nobg', mode='max', verbose=1)
     ]
 
@@ -268,7 +307,7 @@ with strategy.scope():
         model.save(f'paper_checkpoints/{model_save}_glomeruli_multiclass_finetunned.keras')
     
     # Save history to plot later 
-    with open(f'paper_checkpoints/training_history_{model_save}_finetunned_resnet101.pkl', 'wb') as f:
+    with open(f'paper_checkpoints/training_history_{model_save}_finetunned.pkl', 'wb') as f:
         pickle.dump(history.history, f)
 
     # Save best epoch loss and metrics

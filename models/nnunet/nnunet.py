@@ -1,73 +1,83 @@
-### Example for code but not working yet
-### TODO: all
-
-import os
 import torch
-from nnunetv2.training.nnUNetTrainer import nnUNetTrainer
-from nnunetv2.training.loss import TverskyLoss
-from nnunetv2.evaluation.evaluator import Evaluator
-from nnunetv2.paths import nnUNet_preprocessed, nnUNet_results
-from nnunetv2.dataset_conversion.utils import generate_dataset_json
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3" 
+os.environ['nnUnet_raw'] = '/scratch.local2/juanp/glomeruli/dataset/nnunet_data/nnUNet_raw'
+os.environ['nnUnet_preprocessed'] = '/scratch.local2/juanp/glomeruli/dataset/nnunet_data/nnUNet_preprocessed'
+os.environ['nnUnet_results'] = '/scratch.local2/juanp/glomeruli/models/nnunet_data/results'
+from nnunetv2.training.network_training.nnUNetTrainer import nnUNetTrainer
+from nnunetv2.training.loss_functions.dice_loss import TverskyLoss
+from torch.nn import CrossEntropyLoss
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from nnunetv2.utilities.dataloading.dataset_loading import load_dataset_from_json
 
-# Paths to your datasets
-D2_train_dir = '/path/to/D2/train'
-D1_train_dir = '/path/to/D1/train'
-val_dir = '/path/to/val'
-test_dir = '/path/to/test'
+# -----------------------------
+# ----- CONFIGURACIÓN ----------
+# -----------------------------
+DATASET_PATH = "/scratch.local2/juanp/glomeruli/dataset/nnunet_data"
+CHECKPOINTS_DIR = "/scratch.local2/juanp/glomeruli/models/nnunet/checkpoints"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Dataset JSON (required by nnUNet)
-generate_dataset_json(
-    os.path.join(nnUNet_preprocessed, 'Dataset001_MySegmentation'),
-    images_train=[os.path.join(D2_train_dir, f) for f in os.listdir(D2_train_dir)],
-    images_val=[os.path.join(val_dir, f) for f in os.listdir(val_dir)],
-    labels_train=[os.path.join(D2_train_dir, f.replace('_img', '_label')) for f in os.listdir(D2_train_dir)],
-    labels_val=[os.path.join(val_dir, f.replace('_img', '_label')) for f in os.listdir(val_dir)],
-    modality='MRI',
-    labels={0: 'background', 1: 'class1', 2: 'class2'},
-    dataset_name='MySegmentation'
-)
+# Hiperparámetros generales
+NUM_EPOCHS = 30
+INITIAL_LR = 1e-4
+REDUCE_FACTOR = 0.1
+PATIENCE = 7
 
-# Custom loss: 0.5*CE + 0.5*TverskyLoss
-class CombinedLoss(torch.nn.Module):
-    def __init__(self, alpha=0.7, beta=0.3):
-        super().__init__()
-        self.ce = torch.nn.CrossEntropyLoss()
-        self.tversky = TverskyLoss(alpha=alpha, beta=beta)
+# -----------------------------
+# ----- MIX LOSS ---------------
+# -----------------------------
+ce_weight = 0.35
+tversky_weight = 0.65
+tversky_loss = TverskyLoss(alpha=0.7, beta=0.3)
+ce_loss = CrossEntropyLoss()
 
-    def forward(self, logits, targets):
-        ce_loss = self.ce(logits, targets)
-        tversky_loss = self.tversky(logits, targets)
-        return 0.5 * ce_loss + 0.5 * tversky_loss
+def mix_loss(pred, target):
+    return ce_weight * ce_loss(pred, target) + tversky_weight * tversky_loss(pred, target)
 
-# Training on D2 (big dataset)
-trainer = nnUNetTrainer(
-    plans_path=os.path.join(nnUNet_preprocessed, 'Dataset001_MySegmentation', 'nnUNetPlans.json'),
-    fold=0,
-    loss=CombinedLoss(),
-    num_classes=3,
-    device='cuda' if torch.cuda.is_available() else 'cpu'
-)
-trainer.run_training()
+# -----------------------------
+# ----- UTILIDADES -------------
+# -----------------------------
+def train_phase(split_name, previous_checkpoint=None):
+    print(f"\n--- Iniciando fase: {split_name} ---\n")
+    
+    # Cargar dataset
+    dataset_json = os.path.join(DATASET_PATH, f"{split_name}_dataset.json")
+    dataset = load_dataset_from_json(dataset_json)
+    
+    # Crear trainer
+    trainer = nnUNetTrainer(
+        model= None,  # nnU-Net generará la arquitectura automáticamente
+        dataset=dataset,
+        loss_function=mix_loss,
+        optimizer_class=torch.optim.Adam,
+        initial_lr=INITIAL_LR,
+        device=DEVICE,
+        checkpoint_dir=CHECKPOINTS_DIR,
+        monitor_metric="val_dsc_nobg",  # Dice sin fondo
+        reduce_lr_on_plateau=True,
+        reduce_lr_factor=REDUCE_FACTOR,
+        reduce_lr_patience=PATIENCE
+    )
 
-# Finetuning on D1 (small dataset)
-trainer.load_best_checkpoint()
-trainer.change_training_data(
-    images_train=[os.path.join(D1_train_dir, f) for f in os.listdir(D1_train_dir)],
-    labels_train=[os.path.join(D1_train_dir, f.replace('_img', '_label')) for f in os.listdir(D1_train_dir)],
-    images_val=[os.path.join(val_dir, f) for f in os.listdir(val_dir)],
-    labels_val=[os.path.join(val_dir, f.replace('_img', '_label')) for f in os.listdir(val_dir)]
-)
-trainer.run_training(finetune=True)
+    # Si hay checkpoint previo (para fine-tuning)
+    if previous_checkpoint is not None:
+        trainer.load_checkpoint(previous_checkpoint)
+        print(f"Loaded checkpoint from {previous_checkpoint}")
 
-# Testing
-trainer.load_best_checkpoint()
-predictions = trainer.predict([os.path.join(test_dir, f) for f in os.listdir(test_dir)])
+    # Entrenar
+    trainer.train(num_epochs=NUM_EPOCHS)
+    
+    # Devolver mejor checkpoint
+    return trainer.get_best_checkpoint()
 
-# Evaluation
-evaluator = Evaluator(num_classes=3, metrics=['iou', 'dsc'])
-results = evaluator.evaluate(predictions, [os.path.join(test_dir, f.replace('_img', '_label')) for f in os.listdir(test_dir)])
-
-print("General IoU:", results['iou']['mean'])
-print("Class IoU:", results['iou']['per_class'])
-print("General DSC:", results['dsc']['mean'])
-print("Class DSC:", results['dsc']['per_class'])
+# -----------------------------
+# ----- EJECUCIÓN -------------
+# -----------------------------
+if __name__ == "__main__":
+    # Fase 1: D2_train
+    best_checkpoint_phase1 = train_phase("D2_train")
+    
+    # Fase 2: D1 fine-tuning
+    best_checkpoint_phase2 = train_phase("D1_train", previous_checkpoint=best_checkpoint_phase1)
+    
+    print("\nEntrenamiento completado. Mejor checkpoint final:", best_checkpoint_phase2)

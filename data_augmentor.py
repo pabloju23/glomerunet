@@ -205,10 +205,14 @@ def augment_batch(images, masks):
     
     return aug_images, aug_masks
 
-def h5_generator_onehot(h5_path, batch_size, n_classes=3):
+def h5_generator_onehot(h5_path, batch_size, n_classes=3, group=None):
     with h5py.File(h5_path, "r") as f:
-        images = f["images"]
-        masks = f["masks"]
+        if group:
+            images = f[group]["images"]
+            masks = f[group]["masks"]
+        else:
+            images = f["images"]
+            masks = f["masks"]
         n = images.shape[0]
 
         idxs = np.arange(n)
@@ -228,10 +232,10 @@ def h5_generator_onehot(h5_path, batch_size, n_classes=3):
 
 def create_dataset_h5(h5_file, batch_size, augmentation=False, shuffle=True, 
                       shuffle_buffer_size=10, only_positive_masks=False, 
-                      class_target=None, repeat=1, n_classes=3):
+                      class_target=None, repeat=1, n_classes=3, group=None):
 
     dataset = tf.data.Dataset.from_generator(
-        lambda: h5_generator_onehot(h5_file, batch_size, n_classes=n_classes),
+        lambda: h5_generator_onehot(h5_file, batch_size, n_classes=n_classes, group=group),
         output_signature=(
             tf.TensorSpec(shape=(None, 512, 512, 3), dtype=tf.float32),  # RGB
             tf.TensorSpec(shape=(None, 512, 512, n_classes), dtype=tf.float32),  # máscaras one-hot
@@ -265,7 +269,7 @@ def create_dataset_h5(h5_file, batch_size, augmentation=False, shuffle=True,
     return dataset
 
 
-def create_dataset_with_class_augmentation_h5(h5_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=10, n_classes=3):
+def create_dataset_with_class_augmentation_h5(h5_file, batch_size, augmentation=False, shuffle=True, shuffle_buffer_size=10, n_classes=3, group=None):
     def filter_by_class(mask, target_class):
         """Check if a given target class is present in the mask."""
         return tf.reduce_any(mask[..., target_class] > 0)
@@ -280,7 +284,7 @@ def create_dataset_with_class_augmentation_h5(h5_file, batch_size, augmentation=
 
     # Base dataset generation
     dataset = tf.data.Dataset.from_generator(
-        lambda: h5_generator_onehot(h5_file, batch_size, n_classes=n_classes),
+        lambda: h5_generator_onehot(h5_file, batch_size, n_classes=n_classes, group=group),
         output_signature=(
             tf.TensorSpec(shape=(None, 512, 512, 3), dtype=tf.float32),        # imágenes RGB
             tf.TensorSpec(shape=(None, 512, 512, n_classes), dtype=tf.float32) # máscaras one-hot

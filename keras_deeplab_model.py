@@ -45,7 +45,7 @@ def DilatedSpatialPyramidPooling(dspp_input):
     return output
 
 def DilatedSpatialPyramidPooling_mod(dspp_input):
-    # # Ablation study: DSPP with huge pooling (blurry result) 
+    # # Ablation study: DSPP with huge pooling 
     # dims = dspp_input.shape
     # x = layers.AveragePooling2D(pool_size=(dims[-3], dims[-2]))(dspp_input)
     # x = convolution_block(x, kernel_size=1, use_bias=True)
@@ -59,19 +59,19 @@ def DilatedSpatialPyramidPooling_mod(dspp_input):
     x = convolution_block(x, kernel_size=1, use_bias=True)  # Bloque convolucional de 1x1
     out_pool = layers.UpSampling2D(size=(2, 2), interpolation="bilinear")(x)  # Upsample de 16x16 a 32x32
     
-    # Ablation study: original DSPP with dilation rates 1, 6, 12, 18 
-    out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
-    out_6 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
-    out_12 = convolution_block(dspp_input, kernel_size=3, dilation_rate=12)
-    out_18 = convolution_block(dspp_input, kernel_size=3, dilation_rate=18)
-    x = layers.Concatenate(axis=-1)([out_pool, out_1, out_6, out_12, out_18])
-
-    # # For a 512p input, DSPP is performed over 32p area
+    # # Ablation study: original DSPP with dilation rates 1, 6, 12, 18 
     # out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
-    # out_2 = convolution_block(dspp_input, kernel_size=3, dilation_rate=2)
-    # out_4 = convolution_block(dspp_input, kernel_size=3, dilation_rate=4)
-    # out_8 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
-    # x = layers.Concatenate(axis=-1)([out_pool, out_1, out_2, out_4, out_8])
+    # out_6 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
+    # out_12 = convolution_block(dspp_input, kernel_size=3, dilation_rate=12)
+    # out_18 = convolution_block(dspp_input, kernel_size=3, dilation_rate=18)
+    # x = layers.Concatenate(axis=-1)([out_pool, out_1, out_6, out_12, out_18])
+
+    # For a 512p input, DSPP is performed over 32p area
+    out_1 = convolution_block(dspp_input, kernel_size=1, dilation_rate=1)
+    out_2 = convolution_block(dspp_input, kernel_size=3, dilation_rate=2)
+    out_4 = convolution_block(dspp_input, kernel_size=3, dilation_rate=4)
+    out_8 = convolution_block(dspp_input, kernel_size=3, dilation_rate=6)
+    x = layers.Concatenate(axis=-1)([out_pool, out_1, out_2, out_4, out_8])
 
     output = convolution_block(x, kernel_size=1)
     return output
