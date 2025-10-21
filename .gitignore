@@ -3,6 +3,6 @@ dataset/
 runs/
 
 # Ignorar carpetas de predicciones y ejecuciones de monai_swinunetr
-monai_swinunetr/preds_nnunet/
-monai_swinunetr/preds_swinunetr/
-monai_swinunetr/runs/
+models/monai_swinunetr/preds_nnunet/
+models/monai_swinunetr/preds_swinunetr/
+models/monai_swinunetr/runs/
