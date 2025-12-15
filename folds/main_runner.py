@@ -11,17 +11,33 @@ from training_pipeline import train_and_evaluate
 import itertools
 
 
+pretrained_model_path = '/scratch.local2/juanp/glomeruli/paper_checkpoints/deeplab_glomeruli_multiclass_pretrain_pool.keras'  # TODO
+
+pretrain = True
+
+# Load the pretrained model ONCE
+base_model = None
+if pretrain:
+    print("Loading pretrained model...")
+    base_model = tf.keras.models.load_model(pretrained_model_path, compile=False)
+    print("Pretrained model loaded successfully!")
+
+# Define already tested splits to skip
+tested_splits = {
+    # ('fold5', 'fold4', 'fold1-fold2-fold3'),   # Example of already tested split
+}
+
 # Load dataset
-fold1_img = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_1_img.npy')
-fold1_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_1_mask.npy')
-fold2_img = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_2_img.npy')
-fold2_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_2_mask.npy')
-fold3_img = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_3_img.npy')
-fold3_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_3_mask.npy')
-fold4_img = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_4_img.npy')
-fold4_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_4_mask.npy')
-fold5_img = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_5_img.npy')
-fold5_mask = np.load('/scratch.local/juanp/glomeruli/dataset/processed(5fold)/fold_5_mask.npy')
+fold1_img = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_1_img.npy')
+fold1_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_1_mask.npy')
+fold2_img = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_2_img.npy')
+fold2_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_2_mask.npy')
+fold3_img = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_3_img.npy')
+fold3_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_3_mask.npy')
+fold4_img = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_4_img.npy')
+fold4_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_4_mask.npy')
+fold5_img = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_5_img.npy')
+fold5_mask = np.load('/scratch.local2/juanp/glomeruli/dataset/5fold_paper/fold_5_mask.npy')
 
 # # Ensure the data is in the correct dtype
 fold1_img = fold1_img.astype(np.float32)
@@ -64,9 +80,27 @@ for train in train_combinations:
 # Print the total number of unique combinations
 print(f"Total unique splits: {len(unique_splits)}")
 
+# Set up mirrored strategy ONCE before the loop
+strategy = tf.distribute.MirroredStrategy()
+print(f"Number of devices: {strategy.num_replicas_in_sync}")
+
+# Define callbacks with monitor set to validation mean IoU
+callbacks = [
+    tf.keras.callbacks.EarlyStopping(monitor='val_dsc_nobg', mode='max', patience=12, restore_best_weights=True, verbose=1),
+    tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_nobg', mode='max', factor=0.1, patience=7, verbose=1, min_lr=1e-6),
+]
+
 # Iterate through all combinations
 excel_row = 0  # To track the row index for Excel logging
 for train, val, test in unique_splits:
+    # Convert fold names to strings
+    train_folds_str = '-'.join(train)
+    val_fold_str = val[0]
+    test_fold_str = test[0]
+    # Skip already tested splits
+    if (test_fold_str, val_fold_str, train_folds_str) in tested_splits:
+        print(f"Skipping already tested split: train_folds: {train_folds_str}, val_fold: {val_fold_str}, test_fold: {test_fold_str}")
+        continue
     # Concatenate train folds and shuffle
     train_img = np.concatenate([folds[fold][0] for fold in train], axis=0)
     train_mask = np.concatenate([folds[fold][1] for fold in train], axis=0)
@@ -76,13 +110,7 @@ for train, val, test in unique_splits:
     
     # Prepare val and test data
     val_img, val_mask = folds[val[0]]
-    test_img, test_mask = folds[test[0]]
-
-    # Convert fold names to strings
-    train_folds_str = '-'.join(train)
-    val_fold_str = val[0]
-    test_fold_str = test[0]
-    
+    test_img, test_mask = folds[test[0]]    
     
     # Log details and run training
     print(f"Training with train_folds: {train_folds_str}, val_fold: {val_fold_str}, test_fold: {test_fold_str}")
@@ -96,7 +124,10 @@ for train, val, test in unique_splits:
         train_folds=train_folds_str,
         val_fold=val_fold_str,
         test_fold=test_fold_str,
-        excel_row=excel_row
+        excel_row=excel_row,
+        callbacks=callbacks,
+        strategy=strategy,
+        base_model=base_model
     )
     
     # Increment Excel row index

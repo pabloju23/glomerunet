@@ -8,8 +8,8 @@ gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 import numpy as np
-from keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
-from data_augmentor import create_dataset, create_dataset_with_class_augmentation
+from models.keras.keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
+from methods.data_augmentor import create_dataset, create_dataset_with_class_augmentation
 import pickle
 
 
@@ -117,7 +117,7 @@ strategy = tf.distribute.MirroredStrategy()
 
 # Define models to train
 if model_save == 'deeplab':
-    from keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
+    from models.keras.keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
     model_name = DeeplabV3Plus_mod
 elif model_save == 'unetr_2d':
     model_name = "build_unetr_2d"
@@ -140,8 +140,8 @@ performance_summary = []
 
 
 with strategy.scope():
-    from tversky_metric import OneHotTversky
-    from dice_metric import OneHotDice
+    from methods.tversky_metric import OneHotTversky
+    from methods.dice_metric import OneHotDice
 
     target_class_ids=[0, 1, 2]
 
@@ -202,27 +202,7 @@ with strategy.scope():
 
     if model_save == 'deeplab':
         model = model_name(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, backbone='xception', weights='imagenet')
-    elif model_save == 'unetr_2d':
-        model = build_unetr_2d(config)
-    elif model_save == 'unetr':
-        model = model_name(
-                        input_shape = (512, 512, 3),
-                        patch_size = 32,
-                        num_patches = 256,
-                        projection_dim = 256,
-                        transformer_layers = 12,
-                        num_heads = 12,
-                        transformer_units = [1024, 256], 
-                        data_augmentation = None,
-                        num_filters = 32,
-                        num_classes = 3,
-                        decoder_activation = 'relu',
-                        decoder_kernel_init = 'he_normal',
-                        ViT_hidd_mult=3,
-                        batch_norm = True,
-                        dropout = 0.0,
-                    )
-
+        
     model.summary()
 
     # model = DeeplabV3Plus(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES)  #  #  unet(input_shape=(512, 512, 3), num_classes=NUM_CLASSES)  #    

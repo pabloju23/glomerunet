@@ -11,11 +11,19 @@ gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 import numpy as np
-from keras_deeplab_model import DeeplabV3Plus_largev2, DeeplabV3Plus
-from data_augmentor import create_dataset, create_dataset_with_class_augmentation
+from methods.data_augmentor import create_dataset, create_dataset_with_class_augmentation
 import matplotlib.pyplot as plt
 import pandas as pd
 from openpyxl import Workbook, load_workbook
+
+
+# Configuration
+IMAGE_SIZE = (512, 512, 3)  # Reduced size to manage memory
+BATCH_SIZE = 36  # Further reduced batch size to fit GPU memory
+NUM_CLASSES=3
+
+# Train models and save performance summary
+performance_summary = []
 
 
 def update_excel(file_path, row_index, column_values):
@@ -60,46 +68,25 @@ def update_excel(file_path, row_index, column_values):
         wb.save(file_path)
         print(f"Valores añadidos en la fila {row_index + 1} del archivo: {file_path}")
 
-
-# Configuration
-IMAGE_SIZE = (512, 512, 3)  # Reduced size to manage memory
-BATCH_SIZE = 21  # Further reduced batch size to fit GPU memory
-NUM_CLASSES=3
-
-# Define callbacks with monitor set to validation mean IoU
-callbacks = [
-    tf.keras.callbacks.EarlyStopping(monitor='val_dsc_nobg', mode='max', patience=12, restore_best_weights=True, verbose=1),
-    tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_nobg', mode='max', factor=0.1, patience=7, verbose=1, min_lr=1e-6),
-]
-
-# Set up mirrored strategy
-strategy = tf.distribute.MirroredStrategy()
-
-# Define models to train
-model_name = DeeplabV3Plus_largev2
-
-# Train models and save performance summary
-performance_summary = []
-
-def train_and_evaluate(train_img, train_mask, val_img, val_mask, test_img, test_mask, test_fold, val_fold, train_folds, excel_row):
+def train_and_evaluate(train_img, train_mask, val_img, val_mask, test_img, test_mask, test_fold, val_fold, train_folds, excel_row, callbacks, strategy, base_model=None):
     # Create datasets
     train_dataset = create_dataset_with_class_augmentation(train_img, train_mask, batch_size=BATCH_SIZE, shuffle=True, augmentation=True)
     val_dataset = create_dataset(val_img, val_mask, batch_size=BATCH_SIZE, shuffle=False)
     test_dataset = create_dataset(test_img, test_mask, batch_size=6, shuffle=False)
 
     with strategy.scope():
-        from tversky_metric import OneHotTversky
+        from methods.tversky_metric import OneHotTversky
         target_class_ids=[0, 1, 2]
 
         # Create and compile model
         iou_metric = tf.keras.metrics.OneHotIoU(name='IoU', num_classes=NUM_CLASSES, target_class_ids=target_class_ids)  
 
-        from dice_metric import OneHotDice
+        from methods.dice_metric import OneHotDice
         dice_metric = OneHotDice(num_classes=NUM_CLASSES, name='dsc', target_class_ids=target_class_ids)
         dice_nobg = OneHotDice(num_classes=NUM_CLASSES, name='dsc_nobg', target_class_ids=[1, 2])
         dice_1 = OneHotDice(num_classes=NUM_CLASSES, name='dsc1', target_class_ids= [1])
         dice_2 = OneHotDice(num_classes=NUM_CLASSES, name='dsc2', target_class_ids= [2])
-        from tversky_metric import OneHotTversky
+        from methods.tversky_metric import OneHotTversky
         tversky_metric = OneHotTversky(alpha=0.7, beta=0.3, name='tversky', num_classes=NUM_CLASSES, target_class_ids=target_class_ids)
 
         def categorical_focal_tversky_loss(alpha=0.5, gamma=2.0, tversky_alpha=0.7, tversky_beta=0.3):
@@ -141,7 +128,16 @@ def train_and_evaluate(train_img, train_mask, val_img, val_mask, test_img, test_
         opt = adam_opt
 
         # Create model
-        model = model_name(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, backbone='xception', weights='imagenet')
+        if base_model is not None:
+            # Clone the pretrained model to get fresh weights
+            model = tf.keras.models.clone_model(base_model)
+            model.set_weights(base_model.get_weights())
+            print("Model cloned from pretrained base.")
+        else:
+            from models.keras.keras_deeplab_model import DeeplabV3Plus_largev2
+            model = DeeplabV3Plus_largev2(image_size=IMAGE_SIZE[0], num_classes=NUM_CLASSES, 
+                                          backbone='xception', weights='imagenet')
+            print("New model created from scratch.")
         model.compile(optimizer=opt,
                 loss=cftl,
                 metrics=[iou_metric, dice_metric, dice_nobg, dice_1, dice_2])
@@ -200,6 +196,19 @@ def train_and_evaluate(train_img, train_mask, val_img, val_mask, test_img, test_
             'Test Dice 1': test_metrics[4],
             'Test Dice 2': test_metrics[5],
         })
+
+        # Clear the model from memory
+        del model
+        
+        # Clear datasets
+        del train_dataset, val_dataset, test_dataset
+        
+    # Clear TensorFlow's session/graph
+    tf.keras.backend.clear_session()
+    
+    # Force garbage collection
+    import gc
+    gc.collect()
 
     # Guardar en un archivo Excel en la fila excel_row
     output_file = "training_metrics.xlsx"

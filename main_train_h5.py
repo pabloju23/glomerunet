@@ -7,9 +7,9 @@ gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 import numpy as np
-from keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
-from data_augmentor import create_dataset, create_dataset_with_class_augmentation
-from data_augmentor import create_dataset_h5, create_dataset_with_class_augmentation_h5
+from models.keras.keras_deeplab_model import DeeplabV3Plus_mod, DeeplabV3Plus
+from methods.data_augmentor import create_dataset, create_dataset_with_class_augmentation
+from methods.data_augmentor import create_dataset_h5, create_dataset_with_class_augmentation_h5
 import pickle
 
 
@@ -52,8 +52,8 @@ performance_summary = []
 
 
 with strategy.scope():
-    from tversky_metric import OneHotTversky
-    from dice_metric import OneHotDice
+    from methods.tversky_metric import OneHotTversky
+    from methods.dice_metric import OneHotDice
 
     target_class_ids=[0, 1, 2]
 
