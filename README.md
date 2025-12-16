@@ -1,5 +1,5 @@
 # GlomeruNet
-**DeepLab v3+ implementation for glomeruli segmentation**
+**Implementation based on DeepLab v3+ for glomeruli semantic segmentation**
 
 ## Main Scripts (Can be used in npy or h5 data format)
 
